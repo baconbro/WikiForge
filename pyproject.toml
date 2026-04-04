@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wikiforge"
+version = "0.1.0"
+description = "Raw sources in, living wiki out. Your LLM is the editor."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.1",
+    "litellm>=1.40",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+wf = "wikiforge.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wikiforge"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]

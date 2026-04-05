@@ -67,6 +67,57 @@ def ingest(files: tuple[str, ...], ingest_all: bool, dry_run: bool) -> None:
     click.echo(f"{prefix}Ingest complete: {result.new} new, {result.updated} updated, {result.unchanged} unchanged")
 
 
+@cli.command("ingest-text")
+@click.option("--title", "-t", required=True, help="Title for the document (also drives the filename).")
+@click.option("--content", "-c", default=None, help="Text content. Reads from stdin if omitted.")
+@click.option("--subdirectory", "-d", default=None, help="Subdirectory within raw/ (e.g. 'conversations').")
+@click.option("--compile/--no-compile", "do_compile", default=True, help="Auto-compile after ingest (default: yes).")
+@click.option("--dry-run", is_flag=True, help="Show what would happen without writing.")
+def ingest_text(title: str, content: str | None, subdirectory: str | None, do_compile: bool, dry_run: bool) -> None:
+    """Ingest text content directly into raw/ as a markdown file."""
+    import sys
+
+    from wikiforge.ingest import ingest_text as _ingest_text
+    from wikiforge.vault import resolve_vault
+
+    vault = resolve_vault()
+
+    if content is None:
+        if sys.stdin.isatty():
+            raise click.ClickException("No --content provided and stdin is a terminal. Pipe content or use -c.")
+        content = sys.stdin.read()
+
+    if not content.strip():
+        raise click.ClickException("Content is empty.")
+
+    prefix = "[dry-run] " if dry_run else ""
+    file_path, result = _ingest_text(vault, title, content, subdirectory=subdirectory, dry_run=dry_run)
+
+    rel = file_path.relative_to(vault.root) if file_path.is_relative_to(vault.root) else file_path
+    click.echo(f"{prefix}Saved to {rel}")
+    click.echo(f"{prefix}Ingest: {result.new} new, {result.updated} updated, {result.unchanged} unchanged")
+
+    if dry_run or not do_compile:
+        return
+
+    config = vault.load_config()
+    if not config.get_api_key():
+        click.echo("Skipping compile: no API key set.")
+        return
+
+    from wikiforge.compile import run_compile
+
+    click.echo("Compiling...")
+    compile_result = run_compile(vault, config)
+    click.echo(
+        f"Compile: {compile_result.articles_created} created, "
+        f"{compile_result.articles_updated} updated from {compile_result.sources_processed} sources"
+    )
+    if compile_result.errors:
+        for err in compile_result.errors:
+            click.echo(f"  ! {err}")
+
+
 @cli.command()
 @click.option("--plan-only", is_flag=True, help="Show compilation plan without writing articles.")
 def compile(plan_only: bool) -> None:

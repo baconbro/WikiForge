@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,3 +97,46 @@ def ingest_sources(
             append_log(vault, "ingest", f"{result.new} new, {result.updated} updated", details)
 
     return result
+
+
+def _slugify(title: str) -> str:
+    """Convert a title to a kebab-case filename-safe string."""
+    slug = title.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug or "untitled"
+
+
+def ingest_text(
+    vault: Vault,
+    title: str,
+    content: str,
+    subdirectory: str | None = None,
+    dry_run: bool = False,
+) -> tuple[Path, IngestResult]:
+    """Write text content as a markdown file in raw/ and ingest it.
+
+    Returns the file path and the ingest result.
+    """
+    slug = _slugify(title)
+    target_dir = vault.raw_dir / subdirectory if subdirectory else vault.raw_dir
+
+    if not dry_run:
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find a non-colliding filename
+    filename = f"{slug}.md"
+    candidate = target_dir / filename
+    counter = 1
+    while candidate.exists():
+        filename = f"{slug}-{counter}.md"
+        candidate = target_dir / filename
+        counter += 1
+
+    if dry_run:
+        return candidate, IngestResult(new=1)
+
+    candidate.write_text(content, encoding="utf-8")
+    result = ingest_sources(vault, files=[candidate])
+    return candidate, result

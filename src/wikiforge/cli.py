@@ -35,9 +35,10 @@ def init(path: str, name: str | None) -> None:
     try:
         vault = init_vault(Path(path), config)
         click.echo(f"Initialized WikiForge vault at {vault.root}")
-        click.echo(f"  raw/     — Add your source documents here")
-        click.echo(f"  wiki/    — Compiled wiki articles (LLM-generated)")
-        click.echo(f"  outputs/ — Query results and visualizations")
+        click.echo(f"  raw/       — Add your source documents here")
+        click.echo(f"  wiki/      — Compiled wiki articles (LLM-generated)")
+        click.echo(f"  outputs/   — Query results and visualizations")
+        click.echo(f"  schema.md  — Wiki conventions (edit to customize)")
         click.echo()
         click.echo("Next: Add source files to raw/ and run `wf ingest`")
     except FileExistsError as e:
@@ -116,7 +117,11 @@ def compile(plan_only: bool) -> None:
     default=None,
     help="Write answer to a file in outputs/.",
 )
-def query(question: str, output: str | None) -> None:
+@click.option(
+    "--file-back", is_flag=True,
+    help="Save the answer as a wiki page for future reference.",
+)
+def query(question: str, output: str | None, file_back: bool) -> None:
     """Ask a question against the wiki."""
     from wikiforge.query import run_query
     from wikiforge.vault import resolve_vault
@@ -133,21 +138,70 @@ def query(question: str, output: str | None) -> None:
     if output_path and not output_path.is_absolute():
         output_path = vault.outputs_dir / output_path
 
-    result = run_query(vault, config, question, output_path=output_path)
+    result = run_query(vault, config, question, output_path=output_path, file_back=file_back)
 
     click.echo(result.answer)
 
     if result.articles_used:
         click.echo(f"\n---\nBased on: {', '.join(result.articles_used)}")
 
+    if result.filed_back_path:
+        click.echo(f"\nFiled back to: wiki/{result.filed_back_path}")
+
     if output_path:
         click.echo(f"\nAnswer saved to {output_path}")
+
+
+@cli.command()
+@click.option(
+    "--fix", is_flag=True,
+    help="Auto-fix safe issues (broken links, missing backlinks).",
+)
+@click.option(
+    "--check", "checks", multiple=True,
+    help="Specific checks to run (broken_links, orphan_pages, stale_sources, missing_sources, consistency, gaps). Default: structural checks only.",
+)
+def lint(fix: bool, checks: tuple[str, ...]) -> None:
+    """Run health checks on the wiki."""
+    from wikiforge.lint import ALL_CHECKS, LLM_CHECKS, run_lint
+    from wikiforge.vault import resolve_vault
+
+    vault = resolve_vault()
+    config = vault.load_config()
+
+    check_list = list(checks) if checks else None
+
+    # LLM checks require API key
+    if check_list:
+        needs_llm = any(c in LLM_CHECKS for c in check_list)
+    else:
+        needs_llm = False
+
+    if needs_llm and not config.get_api_key():
+        raise click.ClickException(
+            f"API key not found. Set the {config.llm.api_key_env} environment variable."
+        )
+
+    click.echo("Running lint checks...")
+    result = run_lint(vault, config, checks=check_list, fix=fix)
+
+    click.echo(f"\n{len(result.issues)} issue(s) found across {len(result.checks_run)} check(s):")
+
+    if not result.issues:
+        click.echo("  All clear!")
+    else:
+        for issue in result.issues:
+            icon = {"error": "x", "warning": "!", "info": "i"}.get(issue.severity, "?")
+            click.echo(f"  [{icon}] {issue.check}: {issue.message}")
+
+    click.echo(f"\nReport saved to outputs/_lint_report.md")
 
 
 @cli.command()
 def status() -> None:
     """Show vault statistics and pipeline state."""
     from wikiforge.index import load_index
+    from wikiforge.log import render_recent_log
     from wikiforge.manifest import load_manifest
     from wikiforge.models import SourceStatus
     from wikiforge.vault import resolve_vault
@@ -167,9 +221,12 @@ def status() -> None:
     raw_files = sum(1 for _ in vault.raw_dir.rglob("*") if _.is_file()) if vault.raw_dir.exists() else 0
     wiki_files = sum(
         1 for f in vault.wiki_dir.rglob("*.md")
-        if f.is_file() and f.name != "_index.md"
+        if f.is_file() and f.name not in ("_index.md", "_log.md")
     ) if vault.wiki_dir.exists() else 0
     output_files = sum(1 for _ in vault.outputs_dir.rglob("*") if _.is_file()) if vault.outputs_dir.exists() else 0
+
+    # Schema status
+    has_schema = vault.schema_path.exists()
 
     # Categories
     categories: dict[str, int] = {}
@@ -179,6 +236,7 @@ def status() -> None:
     click.echo(f"WikiForge Vault: {config.project_name}")
     click.echo(f"Path: {vault.root}")
     click.echo(f"LLM: {config.llm.provider}/{config.llm.model}")
+    click.echo(f"Schema: {'yes' if has_schema else 'no'}")
     click.echo()
     click.echo(f"Sources: {total} total ({pending} pending, {compiled} compiled, {errors} errors)")
     click.echo(f"Raw files: {raw_files}")
@@ -191,6 +249,15 @@ def status() -> None:
         click.echo("Articles by category:")
         for cat, count in sorted(categories.items()):
             click.echo(f"  {cat}: {count}")
+
+    # Recent activity
+    recent = render_recent_log(vault, n=5)
+    if recent:
+        click.echo()
+        click.echo("Recent activity:")
+        for line in recent.split("\n"):
+            if line.startswith("## ["):
+                click.echo(f"  {line[3:]}")
 
 
 @cli.command()

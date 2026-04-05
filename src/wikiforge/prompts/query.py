@@ -19,24 +19,22 @@ def build_query_messages(
     question: str,
     article_contents: dict[str, str],
     index_summary: str,
+    schema_context: str = "",
 ) -> list[dict]:
     """Build messages for a query against the wiki."""
     articles_block = ""
     for path, content in article_contents.items():
         articles_block += f"\n### Article: {path}\n{content}\n"
 
-    user_content = f"""## Wiki Overview
-{index_summary}
-
-## Relevant Articles
-{articles_block}
-
-## Question
-{question}
-
-Please answer the question based on the wiki articles above."""
+    parts = []
+    if schema_context:
+        parts.append(f"## Wiki Schema\n{schema_context}\n")
+    parts.append(f"## Wiki Overview\n{index_summary}")
+    parts.append(f"\n## Relevant Articles\n{articles_block}")
+    parts.append(f"\n## Question\n{question}")
+    parts.append("\nPlease answer the question based on the wiki articles above.")
 
     return [
         {"role": "system", "content": QUERY_SYSTEM},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": "\n".join(parts)},
     ]

@@ -10,6 +10,7 @@ from wikiforge.config import WikiForgeConfig
 from wikiforge.index import load_index, render_index_for_llm, save_index
 from wikiforge.llm import call_llm, call_llm_json, count_tokens
 from wikiforge.manifest import get_pending_sources, load_manifest, save_manifest
+from wikiforge.schema import load_schema
 from wikiforge.models import (
     ArticlePlan,
     CompilePlan,
@@ -82,9 +83,12 @@ def run_compile(
     if not source_texts:
         return result
 
+    # Load schema for prompt context
+    schema_context = load_schema(vault.schema_path)
+
     # Phase 1: Plan
     index_summary = render_index_for_llm(index)
-    plan_messages = build_plan_messages(index_summary, source_texts)
+    plan_messages = build_plan_messages(index_summary, source_texts, schema_context=schema_context)
     plan = call_llm_json(
         plan_messages,
         CompilePlan,
@@ -98,7 +102,7 @@ def run_compile(
     # Phase 2: Write articles
     for article_plan in plan.articles[: config.compile.max_articles_per_run]:
         try:
-            _compile_article(vault, config, article_plan, source_texts, index, result)
+            _compile_article(vault, config, article_plan, source_texts, index, result, schema_context)
         except Exception as e:
             result.errors.append(f"Error writing {article_plan.filename}: {e}")
 
@@ -120,6 +124,16 @@ def run_compile(
     result.sources_processed = len(pending)
     save_manifest(vault.manifest_path, manifest)
 
+    # Log the compile operation
+    from wikiforge.log import append_log
+
+    details = [f"{result.articles_created} created, {result.articles_updated} updated"]
+    for ap in plan.articles:
+        details.append(f"{'+'  if ap.action == 'create' else '~'} [{ap.category}] {ap.title}")
+    if result.errors:
+        details.extend(f"ERROR: {e}" for e in result.errors)
+    append_log(vault, "compile", f"{len(plan.articles)} articles from {result.sources_processed} sources", details)
+
     return result
 
 
@@ -130,6 +144,7 @@ def _compile_article(
     source_texts: dict[str, str],
     index,
     result: CompileResult,
+    schema_context: str = "",
 ) -> None:
     """Compile a single article from plan."""
     # Gather relevant source content
@@ -152,6 +167,7 @@ def _compile_article(
         category=plan.category,
         existing_content=existing,
         target_length=config.compile.article_target_length,
+        schema_context=schema_context,
     )
 
     article_content = call_llm(messages, model=config.llm.model)

@@ -82,4 +82,17 @@ def ingest_sources(
     if not dry_run:
         save_manifest(vault.manifest_path, manifest)
 
+        # Log the ingest operation
+        if result.new > 0 or result.updated > 0:
+            from wikiforge.log import append_log
+
+            details = []
+            if result.new:
+                details.append(f"{result.new} new source(s)")
+            if result.updated:
+                details.append(f"{result.updated} updated source(s)")
+            if result.unchanged:
+                details.append(f"{result.unchanged} unchanged")
+            append_log(vault, "ingest", f"{result.new} new, {result.updated} updated", details)
+
     return result

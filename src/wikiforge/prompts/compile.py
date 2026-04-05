@@ -39,23 +39,23 @@ Guidelines:
 def build_plan_messages(
     index_content: str,
     source_texts: dict[str, str],
+    schema_context: str = "",
 ) -> list[dict]:
     """Build messages for the compile planning LLM call."""
     source_block = ""
     for path, content in source_texts.items():
         source_block += f"\n### Source: {path}\n{content}\n"
 
-    user_content = f"""## Current Wiki Index
-{index_content}
-
-## New/Changed Sources to Integrate
-{source_block}
-
-Analyze these sources and produce a compilation plan as JSON."""
+    parts = []
+    if schema_context:
+        parts.append(f"## Wiki Schema\n{schema_context}\n")
+    parts.append(f"## Current Wiki Index\n{index_content}")
+    parts.append(f"\n## New/Changed Sources to Integrate\n{source_block}")
+    parts.append("\nAnalyze these sources and produce a compilation plan as JSON.")
 
     return [
         {"role": "system", "content": PLAN_SYSTEM},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": "\n".join(parts)},
     ]
 
 
@@ -111,6 +111,7 @@ def build_write_messages(
     category: str,
     existing_content: str | None = None,
     target_length: int = 800,
+    schema_context: str = "",
 ) -> list[dict]:
     """Build messages for article writing LLM call."""
     system = WRITE_SYSTEM.format(target_length=target_length)
@@ -119,14 +120,17 @@ def build_write_messages(
     for path, content in source_contents.items():
         source_block += f"\n### Source: {path}\n{content}\n"
 
-    user_parts = [
+    user_parts = []
+    if schema_context:
+        user_parts.append(f"## Wiki Schema\n{schema_context}\n")
+    user_parts.extend([
         f"Write a wiki article with the following specifications:",
         f"- Title: {title}",
         f"- Category: {category}",
         f"- Summary: {summary}",
         f"- Related articles to link to: {', '.join(related) if related else 'none yet'}",
         f"\n## Source Material\n{source_block}",
-    ]
+    ])
 
     if existing_content:
         user_parts.append(

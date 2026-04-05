@@ -26,6 +26,7 @@ class CompileConfig(BaseModel):
             "entities",
             "timelines",
             "comparisons",
+            "queries",
         ]
     )
 

@@ -82,3 +82,39 @@ def test_query_saves_output(tmp_vault: Vault) -> None:
     assert output_path.exists()
     content = output_path.read_text()
     assert "42" in content
+
+
+def test_query_file_back(tmp_vault: Vault) -> None:
+    """Test that --file-back creates a wiki page and updates the index."""
+    concepts_dir = tmp_vault.wiki_dir / "concepts"
+    concepts_dir.mkdir(exist_ok=True)
+    (concepts_dir / "test.md").write_text("# Test\n\nContent here.")
+
+    index = WikiIndex(entries=[
+        IndexEntry(path="concepts/test.md", title="Test", summary="A test article")
+    ])
+    save_index(tmp_vault.index_path, index)
+
+    config = tmp_vault.load_config()
+
+    with patch("wikiforge.query.call_llm", return_value="The filed-back answer."):
+        result = run_query(tmp_vault, config, "What is the answer?", file_back=True)
+
+    # Check the answer was filed back
+    assert result.filed_back_path is not None
+    assert result.filed_back_path.startswith("queries/")
+
+    # Check the wiki page was created
+    wiki_page = tmp_vault.wiki_dir / result.filed_back_path
+    assert wiki_page.exists()
+    content = wiki_page.read_text()
+    assert "The filed-back answer." in content
+    assert "Filed back from query" in content
+
+    # Check the index was updated
+    from wikiforge.index import load_index
+    updated_index = load_index(tmp_vault.index_path)
+    assert len(updated_index.entries) == 2  # original + filed-back
+    filed_entry = updated_index.find_by_path(result.filed_back_path)
+    assert filed_entry is not None
+    assert filed_entry.category == "queries"

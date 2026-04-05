@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from wikiforge.config import WikiForgeConfig, load_config, save_config
+from wikiforge.schema import save_default_schema
 
 
 class Vault:
@@ -41,6 +42,14 @@ class Vault:
     def outputs_dir(self) -> Path:
         return self.root / "outputs"
 
+    @property
+    def schema_path(self) -> Path:
+        return self.root / "schema.md"
+
+    @property
+    def log_path(self) -> Path:
+        return self.wiki_dir / "_log.md"
+
     def load_config(self) -> WikiForgeConfig:
         return load_config(self.config_path)
 
@@ -75,6 +84,9 @@ def init_vault(path: Path, config: WikiForgeConfig | None = None) -> Vault:
     vault.manifest_path.write_text(
         "version: 1\nsources: {}\n", encoding="utf-8"
     )
+
+    # Write default schema
+    save_default_schema(vault.schema_path)
 
     # Write index template
     vault.index_path.write_text(
